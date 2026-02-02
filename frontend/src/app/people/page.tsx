@@ -13,28 +13,58 @@ import {
   useCreateEmployeeEmployeesPost,
   useListDepartmentsDepartmentsGet,
   useListEmployeesEmployeesGet,
+  useListTeamsTeamsGet,
+  useProvisionEmployeeAgentEmployeesEmployeeIdProvisionPost,
+  useDeprovisionEmployeeAgentEmployeesEmployeeIdDeprovisionPost,
 } from "@/api/generated/org/org";
 
 export default function PeoplePage() {
+  const [actorId] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      return window.localStorage.getItem("actor_employee_id") ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [name, setName] = useState("");
   const [employeeType, setEmployeeType] = useState<"human" | "agent">("human");
   const [title, setTitle] = useState("");
   const [departmentId, setDepartmentId] = useState<string>("");
+  const [teamId, setTeamId] = useState<string>("");
   const [managerId, setManagerId] = useState<string>("");
 
   const employees = useListEmployeesEmployeesGet();
   const departments = useListDepartmentsDepartmentsGet();
+  const teams = useListTeamsTeamsGet({ department_id: undefined });
   const departmentList = useMemo(() => (departments.data?.status === 200 ? departments.data.data : []), [departments.data]);
   const employeeList = useMemo(() => (employees.data?.status === 200 ? employees.data.data : []), [employees.data]);
+  const teamList = useMemo(() => (teams.data?.status === 200 ? teams.data.data : []), [teams.data]);
+
+  const provisionEmployee = useProvisionEmployeeAgentEmployeesEmployeeIdProvisionPost();
+  const deprovisionEmployee = useDeprovisionEmployeeAgentEmployeesEmployeeIdDeprovisionPost();
 
   const createEmployee = useCreateEmployeeEmployeesPost({
     mutation: {
-      onSuccess: () => {
+      onSuccess: async (res) => {
         setName("");
         setTitle("");
         setDepartmentId("");
+        setTeamId("");
         setManagerId("");
+
+        // If an agent was created but not yet provisioned, provision immediately so it can receive tasks.
+        try {
+          const e = (res as any)?.data?.data ?? (res as any)?.data ?? null;
+          if (e?.employee_type === "agent" && !e.openclaw_session_key) {
+            await provisionEmployee.mutateAsync({ employeeId: e.id! });
+          }
+        } catch {
+          // ignore; UI will show unprovisioned state
+        }
+
         employees.refetch();
+        teams.refetch();
       },
     },
   });
@@ -46,6 +76,14 @@ export default function PeoplePage() {
     }
     return m;
   }, [departmentList]);
+
+  const teamNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const t of teamList) {
+      if (t.id != null) m.set(t.id, t.name);
+    }
+    return m;
+  }, [teamList]);
 
   const empNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -88,6 +126,14 @@ export default function PeoplePage() {
                 </option>
               ))}
             </Select>
+            <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              <option value="">(no team)</option>
+              {teamList.map((t) => (
+                <option key={t.id ?? t.name} value={t.id ?? ""}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
             <Select value={managerId} onChange={(e) => setManagerId(e.target.value)}>
               <option value="">(no manager)</option>
               {employeeList.map((e) => (
@@ -104,6 +150,7 @@ export default function PeoplePage() {
                     employee_type: employeeType,
                     title: title.trim() ? title : null,
                     department_id: departmentId ? Number(departmentId) : null,
+                    team_id: teamId ? Number(teamId) : null,
                     manager_id: managerId ? Number(managerId) : null,
                     status: "active",
                   },
@@ -142,6 +189,7 @@ export default function PeoplePage() {
                     <div className="mt-2 text-sm text-muted-foreground">
                       {e.title ? <span>{e.title} · </span> : null}
                       {e.department_id ? <span>{deptNameById.get(e.department_id) ?? `Dept#${e.department_id}`} · </span> : null}
+                      {e.team_id ? <span>Team: {teamNameById.get(e.team_id) ?? `Team#${e.team_id}`} · </span> : null}
                       {e.manager_id ? <span>Mgr: {empNameById.get(e.manager_id) ?? `Emp#${e.manager_id}`}</span> : <span>No manager</span>}
                     </div>
                   </li>

@@ -26,3 +26,8 @@ class TaskCommentCreate(SQLModel):
     author_employee_id: int | None = None
     reply_to_comment_id: int | None = None
     body: str
+
+
+class TaskReviewDecision(SQLModel):
+    decision: str  # approve | changes
+    comment_body: str

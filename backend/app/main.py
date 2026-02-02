@@ -8,7 +8,10 @@ from app.api.org import router as org_router
 from app.api.projects import router as projects_router
 from app.api.work import router as work_router
 from app.core.config import settings
+from app.core.logging import configure_logging
 from app.db.session import init_db
+
+configure_logging()
 
 app = FastAPI(title="OpenClaw Agency API", version="0.3.0")
 
