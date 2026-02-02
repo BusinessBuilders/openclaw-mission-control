@@ -5,8 +5,7 @@
  * OpenAPI spec version: 0.3.0
  */
 
-export interface ProjectUpdate {
-  name?: string | null;
-  status?: string | null;
-  team_id?: number | null;
+export interface TaskReviewDecision {
+  decision: string;
+  comment_body: string;
 }

@@ -5,10 +5,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.api.utils import get_actor_employee_id, log_activity
+from app.core.urls import public_api_base_url
 from app.db.session import get_session
 from app.integrations.openclaw import OpenClawClient
-from app.models.org import Department, Employee
-from app.schemas.org import DepartmentCreate, DepartmentUpdate, EmployeeCreate, EmployeeUpdate
+from app.models.org import Department, Employee, Team
+from app.schemas.org import (
+    DepartmentCreate,
+    DepartmentUpdate,
+    EmployeeCreate,
+    EmployeeUpdate,
+    TeamCreate,
+    TeamUpdate,
+)
 
 router = APIRouter(tags=["org"])
 
@@ -27,9 +35,15 @@ def _default_agent_prompt(emp: Employee) -> str:
         f"Your employee_id is {emp.id}.\n"
         f"Title: {title}. Department id: {dept}.\n\n"
         "Mission Control API access (no UI):\n"
-        "- Base URL: http://127.0.0.1:8000 (if running locally) OR http://<dev-machine-ip>:8000\n"
-        "- Auth: none. REQUIRED header on write operations: X-Actor-Employee-Id: <your employee_id>\n"
-        f"  For you: X-Actor-Employee-Id: {emp.id}\n\n"
+        f"- Base URL: {public_api_base_url()}\n"
+        "- Auth: none. REQUIRED header on ALL write operations: X-Actor-Employee-Id: <your_employee_id>\n"
+        f"  Example for you: X-Actor-Employee-Id: {emp.id}\n\n"
+        "How to execute writes from an OpenClaw agent (IMPORTANT):\n"
+        "- Use the exec tool to run curl against the Base URL above.\n"
+        "- Example: start a task\n"
+        "  curl -sS -X PATCH $BASE/tasks/<TASK_ID> -H 'X-Actor-Employee-Id: <your_employee_id>' -H 'Content-Type: application/json' -d '{\"status\":\"in_progress\"}'\n"
+        "- Example: add a progress comment\n"
+        "  curl -sS -X POST $BASE/task-comments -H 'X-Actor-Employee-Id: <your_employee_id>' -H 'Content-Type: application/json' -d '{\"task_id\":<TASK_ID>,\"body\":\"...\"}'\n\n"
         "Common endpoints (JSON):\n"
         "- GET /tasks, POST /tasks\n"
         "- GET /task-comments, POST /task-comments\n"
@@ -37,7 +51,11 @@ def _default_agent_prompt(emp: Employee) -> str:
         "- OpenAPI schema: GET /openapi.json\n\n"
         "Rules:\n"
         "- Use the Mission Control API only (no UI).\n"
-        "- When notified about tasks/comments, respond with concise, actionable updates.\n"
+        "- You are responsible for driving assigned work to completion.\n"
+        "- For every task you own: (1) read it, (2) plan next steps, (3) post progress comments, (4) update status as it moves (backlog/ready/in_progress/review/done/blocked).\n"
+        "- Always leave an audit trail: add a comment whenever you start work, whenever you learn something important, and whenever you change status.\n"
+        "- If blocked, set status=blocked and comment what you need (missing access, unclear requirements, etc.).\n"
+        "- When notified about tasks/comments, respond with concise, actionable updates and immediately sync the task state in Mission Control.\n"
         "- Do not invent facts; ask for missing context.\n"
     )
 
@@ -127,6 +145,81 @@ def list_departments(session: Session = Depends(get_session)):
     return session.exec(select(Department).order_by(Department.name.asc())).all()
 
 
+@router.get("/teams", response_model=list[Team])
+def list_teams(department_id: int | None = None, session: Session = Depends(get_session)):
+    q = select(Team)
+    if department_id is not None:
+        q = q.where(Team.department_id == department_id)
+    return session.exec(q.order_by(Team.name.asc())).all()
+
+
+@router.post("/teams", response_model=Team)
+def create_team(
+    payload: TeamCreate,
+    session: Session = Depends(get_session),
+    actor_employee_id: int = Depends(get_actor_employee_id),
+):
+    team = Team(**payload.model_dump())
+    session.add(team)
+
+    try:
+        session.flush()
+        log_activity(
+            session,
+            actor_employee_id=actor_employee_id,
+            entity_type="team",
+            entity_id=team.id,
+            verb="created",
+            payload={
+                "name": team.name,
+                "department_id": team.department_id,
+                "lead_employee_id": team.lead_employee_id,
+            },
+        )
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Team already exists or violates constraints")
+
+    session.refresh(team)
+    return team
+
+
+@router.patch("/teams/{team_id}", response_model=Team)
+def update_team(
+    team_id: int,
+    payload: TeamUpdate,
+    session: Session = Depends(get_session),
+    actor_employee_id: int = Depends(get_actor_employee_id),
+):
+    team = session.get(Team, team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(team, k, v)
+
+    session.add(team)
+    try:
+        session.flush()
+        log_activity(
+            session,
+            actor_employee_id=actor_employee_id,
+            entity_type="team",
+            entity_id=team.id,
+            verb="updated",
+            payload=data,
+        )
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Team update violates constraints")
+
+    session.refresh(team)
+    return team
+
+
 @router.post("/departments", response_model=Department)
 def create_department(
     payload: DepartmentCreate,
@@ -155,7 +248,9 @@ def create_department(
         session.commit()
     except IntegrityError:
         session.rollback()
-        raise HTTPException(status_code=409, detail="Department already exists or violates constraints")
+        raise HTTPException(
+            status_code=409, detail="Department already exists or violates constraints"
+        )
 
     session.refresh(dept)
     return dept
@@ -179,7 +274,14 @@ def update_department(
     session.add(dept)
     session.commit()
     session.refresh(dept)
-    log_activity(session, actor_employee_id=actor_employee_id, entity_type="department", entity_id=dept.id, verb="updated", payload=data)
+    log_activity(
+        session,
+        actor_employee_id=actor_employee_id,
+        entity_type="department",
+        entity_id=dept.id,
+        verb="updated",
+        payload=data,
+    )
     session.commit()
     return dept
 
@@ -239,7 +341,14 @@ def update_employee(
     session.add(emp)
     try:
         session.flush()
-        log_activity(session, actor_employee_id=actor_employee_id, entity_type="employee", entity_id=emp.id, verb="updated", payload=data)
+        log_activity(
+            session,
+            actor_employee_id=actor_employee_id,
+            entity_type="employee",
+            entity_id=emp.id,
+            verb="updated",
+            payload=data,
+        )
         session.commit()
     except IntegrityError:
         session.rollback()
@@ -286,7 +395,10 @@ def deprovision_employee_agent(
         try:
             client.tools_invoke(
                 "sessions_send",
-                {"sessionKey": emp.openclaw_session_key, "message": "You are being deprovisioned. Stop all work and ignore future messages."},
+                {
+                    "sessionKey": emp.openclaw_session_key,
+                    "message": "You are being deprovisioned. Stop all work and ignore future messages.",
+                },
                 timeout_s=5.0,
             )
         except Exception:
