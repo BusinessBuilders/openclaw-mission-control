@@ -210,9 +210,10 @@ def build_update_message(
         "```\n"
         "Note: if any agents.list entry defines heartbeat, only those agents "
         "run heartbeats.\n"
-        "7) After the update completes, confirm by calling:\n"
+        "7) After the update completes (and only after files are written), confirm by calling:\n"
         f"   POST {context['base_url']}/api/v1/agents/{context['agent_id']}/provision/confirm\n"
-        f"   Body: {{\"token\": \"{confirm_token}\", \"action\": \"update\"}}\n\n"
+        f"   Body: {{\"token\": \"{confirm_token}\", \"action\": \"update\"}}\n"
+        "   Mission Control will send the hello message only after this confirmation.\n\n"
         "Files:" + file_blocks
     )
 

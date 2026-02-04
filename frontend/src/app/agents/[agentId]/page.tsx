@@ -48,9 +48,18 @@ type ActivityEvent = {
   created_at: string;
 };
 
-const formatTimestamp = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+const parseTimestamp = (value?: string | null) => {
+  if (!value) return null;
+  const hasTz = /[zZ]|[+-]\d\d:\d\d$/.test(value);
+  const normalized = hasTz ? value : `${value}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+
+const formatTimestamp = (value?: string | null) => {
+  const date = parseTimestamp(value);
+  if (!date) return "—";
   return date.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
@@ -59,9 +68,9 @@ const formatTimestamp = (value: string) => {
   });
 };
 
-const formatRelative = (value: string) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+const formatRelative = (value?: string | null) => {
+  const date = parseTimestamp(value);
+  if (!date) return "—";
   const diff = Date.now() - date.getTime();
   const minutes = Math.round(diff / 60000);
   if (minutes < 1) return "Just now";

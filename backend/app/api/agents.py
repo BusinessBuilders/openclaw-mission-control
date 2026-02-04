@@ -108,7 +108,7 @@ async def _ensure_gateway_session(
 
 def _with_computed_status(agent: Agent) -> Agent:
     now = datetime.utcnow()
-    if agent.status == "deleting":
+    if agent.status in {"deleting", "updating"}:
         return agent
     if agent.last_seen_at is None:
         agent.status = "provisioning"
@@ -283,6 +283,7 @@ async def update_agent(
     agent.provision_confirm_token_hash = hash_agent_token(provision_token)
     agent.provision_requested_at = datetime.utcnow()
     agent.provision_action = "update"
+    agent.status = "updating"
     session.add(agent)
     session.commit()
     session.refresh(agent)
@@ -560,6 +561,8 @@ def confirm_provision_agent(
     agent.provision_confirm_token_hash = None
     agent.provision_requested_at = None
     agent.provision_action = None
+    if action == "update":
+        agent.status = "online"
     agent.updated_at = datetime.utcnow()
     session.add(agent)
     record_activity(
