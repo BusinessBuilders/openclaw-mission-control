@@ -93,7 +93,7 @@ export default function OnboardingPage() {
       setName(data.preferred_name ?? data.name ?? fallbackName);
       setTimezone(data.timezone ?? "");
       if (isCompleteProfile(data)) {
-        router.replace("/boards");
+        router.replace("/dashboard");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -145,7 +145,7 @@ export default function OnboardingPage() {
       if (!response.ok) {
         throw new Error("Unable to update profile.");
       }
-      router.replace("/boards");
+      router.replace("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {

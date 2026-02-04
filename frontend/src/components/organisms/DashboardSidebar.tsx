@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, LayoutGrid } from "lucide-react";
+import { BarChart3, Bot, LayoutGrid } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -16,6 +16,17 @@ export function DashboardSidebar() {
           Navigation
         </p>
         <nav className="space-y-2 text-sm">
+          <Link
+            href="/dashboard"
+            className={cn(
+              "flex items-center gap-3 rounded-xl border border-transparent px-3 py-2 font-semibold text-muted transition hover:border-[color:var(--border)] hover:bg-[color:var(--surface-muted)]",
+              pathname === "/dashboard" &&
+                "border-[color:var(--accent-soft)] bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)]"
+            )}
+          >
+            <BarChart3 className="h-4 w-4" />
+            Dashboard
+          </Link>
           <Link
             href="/boards"
             className={cn(
