@@ -336,6 +336,35 @@ async def create_agent(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="An agent with this name already exists on this board.",
             )
+        # Prevent OpenClaw session/workspace collisions by enforcing uniqueness within
+        # the gateway workspace too (agents on other boards share the same gateway root).
+        existing_gateway = (
+            await session.exec(
+                select(Agent)
+                .join(Board, col(Agent.board_id) == col(Board.id))
+                .where(col(Board.gateway_id) == gateway.id)
+                .where(col(Agent.name).ilike(requested_name))
+            )
+        ).first()
+        if existing_gateway:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An agent with this name already exists in this gateway workspace.",
+            )
+        desired_session_key = _build_session_key(requested_name)
+        existing_session_key = (
+            await session.exec(
+                select(Agent)
+                .join(Board, col(Agent.board_id) == col(Board.id))
+                .where(col(Board.gateway_id) == gateway.id)
+                .where(col(Agent.openclaw_session_id) == desired_session_key)
+            )
+        ).first()
+        if existing_session_key:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This agent name would collide with an existing workspace session key. Pick a different name.",
+            )
     agent = Agent.model_validate(data)
     agent.status = "provisioning"
     raw_token = generate_agent_token()
