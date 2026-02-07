@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
-import { SignInButton, SignedIn, SignedOut, useAuth } from "@clerk/nextjs";
+import { SignInButton, SignedIn, SignedOut, useAuth } from "@/auth/clerk";
 import { ArrowUpRight, Activity as ActivityIcon } from "lucide-react";
 
 import { ApiError } from "@/api/mutator";
@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { createExponentialBackoff } from "@/lib/backoff";
 import { apiDatetimeToMs, parseApiDatetime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
+import { usePageActive } from "@/hooks/usePageActive";
 
 const SSE_RECONNECT_BACKOFF = {
   baseMs: 1_000,
@@ -132,6 +133,7 @@ FeedCard.displayName = "FeedCard";
 
 export default function ActivityPage() {
   const { isSignedIn } = useAuth();
+  const isPageActive = usePageActive();
 
   const feedQuery = useListTaskCommentFeedApiV1ActivityTaskCommentsGet<
     listTaskCommentFeedApiV1ActivityTaskCommentsGetResponse,
@@ -189,6 +191,7 @@ export default function ActivityPage() {
   }, []);
 
   useEffect(() => {
+    if (!isPageActive) return;
     if (!isSignedIn) return;
     let isCancelled = false;
     const abortController = new AbortController();
@@ -278,7 +281,7 @@ export default function ActivityPage() {
         window.clearTimeout(reconnectTimeout);
       }
     };
-  }, [isSignedIn, pushFeedItem]);
+  }, [isPageActive, isSignedIn, pushFeedItem]);
 
   const orderedFeed = useMemo(() => {
     return [...feedItems].sort((a, b) => {

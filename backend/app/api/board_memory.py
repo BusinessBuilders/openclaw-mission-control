@@ -65,9 +65,10 @@ async def _send_agent_message(
     config: GatewayClientConfig,
     agent_name: str,
     message: str,
+    deliver: bool = False,
 ) -> None:
     await ensure_session(session_key, config=config, label=agent_name)
-    await send_message(message, session_key=session_key, config=config, deliver=False)
+    await send_message(message, session_key=session_key, config=config, deliver=deliver)
 
 
 async def _fetch_memory_events(
@@ -102,6 +103,31 @@ async def _notify_chat_targets(
     config = await _gateway_config(session, board)
     if config is None:
         return
+
+    normalized = memory.content.strip()
+    command = normalized.lower()
+    # Special-case control commands to reach all board agents.
+    # These are intended to be parsed verbatim by agent runtimes.
+    if command in {"/pause", "/resume"}:
+        statement = select(Agent).where(col(Agent.board_id) == board.id)
+        targets = list(await session.exec(statement))
+        for agent in targets:
+            if actor.actor_type == "agent" and actor.agent and agent.id == actor.agent.id:
+                continue
+            if not agent.openclaw_session_id:
+                continue
+            try:
+                await _send_agent_message(
+                    session_key=agent.openclaw_session_id,
+                    config=config,
+                    agent_name=agent.name,
+                    message=command,
+                    deliver=True,
+                )
+            except OpenClawGatewayError:
+                continue
+        return
+
     mentions = extract_mentions(memory.content)
     statement = select(Agent).where(col(Agent.board_id) == board.id)
     targets: dict[str, Agent] = {}

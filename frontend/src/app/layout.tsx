@@ -3,7 +3,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
-import { IBM_Plex_Sans, Sora } from "next/font/google";
+import { DM_Serif_Display, IBM_Plex_Sans, Sora } from "next/font/google";
 
 import { AuthProvider } from "@/components/providers/AuthProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
@@ -27,11 +27,18 @@ const headingFont = Sora({
   weight: ["500", "600", "700"],
 });
 
+const displayFont = DM_Serif_Display({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-display",
+  weight: ["400"],
+});
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body
-        className={`${bodyFont.variable} ${headingFont.variable} min-h-screen bg-app text-strong antialiased`}
+        className={`${bodyFont.variable} ${headingFont.variable} ${displayFont.variable} min-h-screen bg-app text-strong antialiased`}
       >
         <AuthProvider>
           <QueryProvider>{children}</QueryProvider>

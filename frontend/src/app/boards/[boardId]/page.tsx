@@ -10,8 +10,12 @@ import {
   Activity,
   ArrowUpRight,
   MessageSquare,
+  Pause,
+  Plus,
   Pencil,
+  Play,
   Settings,
+  ShieldCheck,
   X,
 } from "lucide-react";
 
@@ -72,6 +76,7 @@ import type {
 import { createExponentialBackoff } from "@/lib/backoff";
 import { apiDatetimeToMs, parseApiDatetime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
+import { usePageActive } from "@/hooks/usePageActive";
 
 type Board = BoardRead;
 
@@ -298,6 +303,7 @@ export default function BoardDetailPage() {
   const boardIdParam = params?.boardId;
   const boardId = Array.isArray(boardIdParam) ? boardIdParam[0] : boardIdParam;
   const { isSignedIn } = useAuth();
+  const isPageActive = usePageActive();
   const taskIdFromUrl = searchParams.get("taskId");
 
   const [board, setBoard] = useState<Board | null>(null);
@@ -340,6 +346,15 @@ export default function BoardDetailPage() {
   const [chatError, setChatError] = useState<string | null>(null);
   const chatMessagesRef = useRef<BoardChatMessage[]>([]);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const [isAgentsControlDialogOpen, setIsAgentsControlDialogOpen] =
+    useState(false);
+  const [agentsControlAction, setAgentsControlAction] = useState<
+    "pause" | "resume"
+  >("pause");
+  const [isAgentsControlSending, setIsAgentsControlSending] = useState(false);
+  const [agentsControlError, setAgentsControlError] = useState<string | null>(
+    null,
+  );
   const [isDeletingTask, setIsDeletingTask] = useState(false);
   const [deleteTaskError, setDeleteTaskError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"board" | "list">("board");
@@ -579,8 +594,22 @@ export default function BoardDetailPage() {
     return new Date(latest).toISOString();
   };
 
+  const lastAgentControlCommand = useMemo(() => {
+    for (let i = chatMessages.length - 1; i >= 0; i -= 1) {
+      const value = (chatMessages[i]?.content ?? "").trim().toLowerCase();
+      if (value === "/pause" || value === "/resume") {
+        return value;
+      }
+    }
+    return null;
+  }, [chatMessages]);
+
+  const isAgentsPaused = lastAgentControlCommand === "/pause";
+
   useEffect(() => {
+    if (!isPageActive) return;
     if (!isSignedIn || !boardId || !board) return;
+    if (!isChatOpen) return;
     let isCancelled = false;
     const abortController = new AbortController();
     const backoff = createExponentialBackoff(SSE_RECONNECT_BACKOFF);
@@ -685,9 +714,10 @@ export default function BoardDetailPage() {
         window.clearTimeout(reconnectTimeout);
       }
     };
-  }, [board, boardId, isSignedIn]);
+  }, [board, boardId, isChatOpen, isPageActive, isSignedIn]);
 
   useEffect(() => {
+    if (!isPageActive) return;
     if (!isSignedIn || !boardId || !board) return;
     let isCancelled = false;
     const abortController = new AbortController();
@@ -817,7 +847,7 @@ export default function BoardDetailPage() {
         window.clearTimeout(reconnectTimeout);
       }
     };
-  }, [board, boardId, isSignedIn]);
+  }, [board, boardId, isPageActive, isSignedIn]);
 
   useEffect(() => {
     if (!selectedTask) {
@@ -840,6 +870,7 @@ export default function BoardDetailPage() {
   }, [selectedTask]);
 
   useEffect(() => {
+    if (!isPageActive) return;
     if (!isSignedIn || !boardId || !board) return;
     let isCancelled = false;
     const abortController = new AbortController();
@@ -1003,9 +1034,10 @@ export default function BoardDetailPage() {
         window.clearTimeout(reconnectTimeout);
       }
     };
-  }, [board, boardId, isSignedIn, pushLiveFeed]);
+  }, [board, boardId, isPageActive, isSignedIn, pushLiveFeed]);
 
   useEffect(() => {
+    if (!isPageActive) return;
     if (!isSignedIn || !boardId) return;
     let isCancelled = false;
     const abortController = new AbortController();
@@ -1109,7 +1141,7 @@ export default function BoardDetailPage() {
         window.clearTimeout(reconnectTimeout);
       }
     };
-  }, [board, boardId, isSignedIn]);
+  }, [board, boardId, isPageActive, isSignedIn]);
 
   const resetForm = () => {
     setTitle("");
@@ -1156,13 +1188,16 @@ export default function BoardDetailPage() {
     }
   };
 
-  const handleSendChat = useCallback(
-    async (content: string): Promise<boolean> => {
-      if (!isSignedIn || !boardId) return false;
+  const postBoardChatMessage = useCallback(
+    async (
+      content: string,
+    ): Promise<{ ok: boolean; error: string | null }> => {
+      if (!isSignedIn || !boardId) {
+        return { ok: false, error: "Sign in to send messages." };
+      }
       const trimmed = content.trim();
-      if (!trimmed) return false;
-      setIsChatSending(true);
-      setChatError(null);
+      if (!trimmed) return { ok: false, error: null };
+
       try {
         const result = await createBoardMemoryApiV1BoardsBoardIdMemoryPost(
           boardId,
@@ -1188,18 +1223,61 @@ export default function BoardDetailPage() {
             return next;
           });
         }
-        return true;
+        return { ok: true, error: null };
       } catch (err) {
-        setChatError(
-          err instanceof Error ? err.message : "Unable to send message.",
-        );
-        return false;
-      } finally {
-        setIsChatSending(false);
+        const message =
+          err instanceof Error ? err.message : "Unable to send message.";
+        return { ok: false, error: message };
       }
     },
     [boardId, isSignedIn],
   );
+
+  const handleSendChat = useCallback(
+    async (content: string): Promise<boolean> => {
+      const trimmed = content.trim();
+      if (!trimmed) return false;
+      setIsChatSending(true);
+      setChatError(null);
+      try {
+        const result = await postBoardChatMessage(trimmed);
+        if (!result.ok) {
+          if (result.error) {
+            setChatError(result.error);
+          }
+          return false;
+        }
+        return true;
+      } finally {
+        setIsChatSending(false);
+      }
+    },
+    [postBoardChatMessage],
+  );
+
+  const openAgentsControlDialog = (action: "pause" | "resume") => {
+    setAgentsControlAction(action);
+    setAgentsControlError(null);
+    setIsAgentsControlDialogOpen(true);
+  };
+
+  const handleConfirmAgentsControl = useCallback(async () => {
+    const command = agentsControlAction === "pause" ? "/pause" : "/resume";
+    setIsAgentsControlSending(true);
+    setAgentsControlError(null);
+    try {
+      const result = await postBoardChatMessage(command);
+      if (!result.ok) {
+        setAgentsControlError(
+          result.error ?? `Unable to send ${command} command.`,
+        );
+        return;
+      }
+      setIsAgentsControlDialogOpen(false);
+    } finally {
+      setIsAgentsControlSending(false);
+    }
+  }, [agentsControlAction, postBoardChatMessage]);
 
   const assigneeById = useMemo(() => {
     const map = new Map<string, string>();
@@ -1862,20 +1940,47 @@ export default function BoardDetailPage() {
                       List
                     </button>
                   </div>
-                  <Button onClick={() => setIsDialogOpen(true)}>
-                    New task
+                  <Button
+                    onClick={() => setIsDialogOpen(true)}
+                    className="h-9 w-9 p-0"
+                    aria-label="New task"
+                    title="New task"
+                  >
+                    <Plus className="h-4 w-4" />
                   </Button>
                   <Button
                     variant="outline"
                     onClick={() => router.push(`/boards/${boardId}/approvals`)}
-                    className="relative"
+                    className="relative h-9 w-9 p-0"
+                    aria-label="Approvals"
+                    title="Approvals"
                   >
-                    Approvals
+                    <ShieldCheck className="h-4 w-4" />
                     {pendingApprovals.length > 0 ? (
-                      <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white">
+                      <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                         {pendingApprovals.length}
                       </span>
                     ) : null}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      openAgentsControlDialog(
+                        isAgentsPaused ? "resume" : "pause",
+                      )
+                    }
+                    disabled={!isSignedIn || !boardId || isAgentsControlSending}
+                    className={cn("h-9 w-9 p-0", isAgentsPaused
+                      ? "border-amber-200 bg-amber-50/60 text-amber-700 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
+                      : "")}
+                    aria-label={isAgentsPaused ? "Resume agents" : "Pause agents"}
+                    title={isAgentsPaused ? "Resume agents" : "Pause agents"}
+                  >
+                    {isAgentsPaused ? (
+                      <Play className="h-4 w-4" />
+                    ) : (
+                      <Pause className="h-4 w-4" />
+                    )}
                   </Button>
                   <Button
                     variant="outline"
@@ -2787,6 +2892,66 @@ export default function BoardDetailPage() {
             </Button>
             <Button onClick={handleCreateTask} disabled={isCreating}>
               {isCreating ? "Creating…" : "Create task"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isAgentsControlDialogOpen}
+        onOpenChange={(nextOpen) => {
+          setIsAgentsControlDialogOpen(nextOpen);
+          if (!nextOpen) {
+            setAgentsControlError(null);
+          }
+        }}
+      >
+        <DialogContent aria-label="Agent controls">
+          <DialogHeader>
+            <DialogTitle>
+              {agentsControlAction === "pause" ? "Pause agents" : "Resume agents"}
+            </DialogTitle>
+            <DialogDescription>
+              {agentsControlAction === "pause"
+                ? "Send /pause to every agent on this board."
+                : "Send /resume to every agent on this board."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {agentsControlError ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+              {agentsControlError}
+            </div>
+          ) : null}
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            <p className="font-semibold text-slate-900">What happens</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>
+                This posts{" "}
+                <span className="font-mono">
+                  {agentsControlAction === "pause" ? "/pause" : "/resume"}
+                </span>{" "}
+                to board chat.
+              </li>
+              <li>Mission Control forwards it to all agents on this board.</li>
+            </ul>
+          </div>
+
+          <DialogFooter className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsAgentsControlDialogOpen(false)}
+              disabled={isAgentsControlSending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmAgentsControl} disabled={isAgentsControlSending}>
+              {isAgentsControlSending
+                ? "Sending…"
+                : agentsControlAction === "pause"
+                  ? "Pause agents"
+                  : "Resume agents"}
             </Button>
           </DialogFooter>
         </DialogContent>
