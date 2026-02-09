@@ -20,17 +20,11 @@ import {
   useGetMeApiV1UsersMeGet,
   useUpdateMeApiV1UsersMePatch,
 } from "@/api/generated/users/users";
-import type { UserRead } from "@/api/generated/model";
 import { DashboardShell } from "@/components/templates/DashboardShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import SearchableSelect from "@/components/ui/searchable-select";
-
-const isCompleteProfile = (profile: UserRead | null | undefined) => {
-  if (!profile) return false;
-  const resolvedName = profile.preferred_name?.trim() || profile.name?.trim();
-  return Boolean(resolvedName) && Boolean(profile.timezone?.trim());
-};
+import { isOnboardingComplete } from "@/lib/onboarding";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -113,7 +107,7 @@ export default function OnboardingPage() {
   );
 
   useEffect(() => {
-    if (profile && isCompleteProfile(profile)) {
+    if (profile && isOnboardingComplete(profile)) {
       router.replace("/dashboard");
     }
   }, [profile, router]);
