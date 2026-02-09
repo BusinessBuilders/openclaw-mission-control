@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
-import { SignedIn, useAuth, useUser } from "@/auth/clerk";
+import { SignedIn, useAuth } from "@/auth/clerk";
 
 import { ApiError } from "@/api/mutator";
 import {
@@ -20,9 +20,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { isSignedIn } = useAuth();
-  const { user } = useUser();
-  const displayName =
-    user?.fullName ?? user?.firstName ?? user?.username ?? "Operator";
   const isOnboardingPath = pathname === "/onboarding";
 
   const meQuery = useGetMeApiV1UsersMeGet<
@@ -36,6 +33,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     },
   });
   const profile = meQuery.data?.status === 200 ? meQuery.data.data : null;
+  const displayName = profile?.name ?? profile?.preferred_name ?? "Operator";
+  const displayEmail = profile?.email ?? "";
 
   useEffect(() => {
     if (!isSignedIn || isOnboardingPath) return;
@@ -91,7 +90,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 </p>
                 <p className="text-xs text-slate-500">Operator</p>
               </div>
-              <UserMenu />
+              <UserMenu displayName={displayName} displayEmail={displayEmail} />
             </div>
           </SignedIn>
         </div>

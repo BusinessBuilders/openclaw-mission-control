@@ -69,14 +69,14 @@ export default function GatewayDetailPage() {
         gateway_token: gateway.token ?? undefined,
         gateway_main_session_key: gateway.main_session_key ?? undefined,
       }
-    : undefined;
+    : {};
 
   const statusQuery = useGatewaysStatusApiV1GatewaysStatusGet<
     gatewaysStatusApiV1GatewaysStatusGetResponse,
     ApiError
   >(statusParams, {
     query: {
-      enabled: Boolean(isSignedIn && isAdmin && statusParams),
+      enabled: Boolean(isSignedIn && isAdmin && gateway),
       refetchInterval: 15_000,
     },
   });

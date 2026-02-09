@@ -12,6 +12,7 @@ import {
   LogOut,
   Plus,
   Server,
+  Settings,
   Trello,
 } from "lucide-react";
 
@@ -22,17 +23,26 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
-export function UserMenu({ className }: { className?: string }) {
+type UserMenuProps = {
+  className?: string;
+  displayName?: string;
+  displayEmail?: string;
+};
+
+export function UserMenu({
+  className,
+  displayName: displayNameFromDb,
+  displayEmail: displayEmailFromDb,
+}: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const { user } = useUser();
   if (!user) return null;
 
   const avatarUrl = user.imageUrl ?? null;
-  const avatarLabelSource = user.firstName ?? user.username ?? user.id ?? "U";
+  const avatarLabelSource = displayNameFromDb ?? user.id ?? "U";
   const avatarLabel = avatarLabelSource.slice(0, 1).toUpperCase();
-  const displayName =
-    user.fullName ?? user.firstName ?? user.username ?? "Account";
-  const displayEmail = user.primaryEmailAddress?.emailAddress ?? "";
+  const displayName = displayNameFromDb ?? "Account";
+  const displayEmail = displayEmailFromDb ?? "";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -140,6 +150,7 @@ export function UserMenu({ className }: { className?: string }) {
               { href: "/activity", label: "Activity", icon: Activity },
               { href: "/agents", label: "Agents", icon: Bot },
               { href: "/gateways", label: "Gateways", icon: Server },
+              { href: "/settings", label: "Settings", icon: Settings },
             ] as const
           ).map((item) => (
             <Link

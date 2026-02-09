@@ -332,6 +332,67 @@ async def _fetch_clerk_profile(clerk_user_id: str) -> tuple[str | None, str | No
     return None, None
 
 
+async def delete_clerk_user(clerk_user_id: str) -> None:
+    """Delete a Clerk user via the official Clerk SDK."""
+    secret = settings.clerk_secret_key.strip()
+    secret_kind = secret.split("_", maxsplit=1)[0] if "_" in secret else "unknown"
+    server_url = _normalize_clerk_server_url(settings.clerk_api_url or "")
+
+    try:
+        async with Clerk(
+            bearer_auth=secret,
+            server_url=server_url,
+            timeout_ms=5000,
+        ) as clerk:
+            await clerk.users.delete_async(user_id=clerk_user_id)
+        logger.info("auth.clerk.user.delete clerk_user_id=%s", clerk_user_id)
+    except ClerkErrors as exc:
+        errors_payload = str(exc)
+        if len(errors_payload) > 300:
+            errors_payload = f"{errors_payload[:300]}..."
+        logger.warning(
+            "auth.clerk.user.delete_failed clerk_user_id=%s reason=clerk_errors "
+            "secret_kind=%s body=%s",
+            clerk_user_id,
+            secret_kind,
+            errors_payload,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to delete account from Clerk",
+        ) from exc
+    except SDKError as exc:
+        if exc.status_code == 404:
+            logger.info("auth.clerk.user.delete_missing clerk_user_id=%s", clerk_user_id)
+            return
+        response_body = exc.body.strip() or None
+        if response_body and len(response_body) > 300:
+            response_body = f"{response_body[:300]}..."
+        logger.warning(
+            "auth.clerk.user.delete_failed clerk_user_id=%s status=%s reason=sdk_error "
+            "server_url=%s secret_kind=%s body=%s",
+            clerk_user_id,
+            exc.status_code,
+            server_url,
+            secret_kind,
+            response_body,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to delete account from Clerk",
+        ) from exc
+    except Exception as exc:
+        logger.warning(
+            "auth.clerk.user.delete_failed clerk_user_id=%s reason=sdk_exception",
+            clerk_user_id,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to delete account from Clerk",
+        ) from exc
+
+
 async def _get_or_sync_user(
     session: AsyncSession,
     *,
