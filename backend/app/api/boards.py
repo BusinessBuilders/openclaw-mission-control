@@ -38,10 +38,8 @@ from app.schemas.common import OkResponse
 from app.schemas.pagination import DefaultLimitOffsetPage
 from app.schemas.view_models import BoardGroupSnapshot, BoardSnapshot
 from app.services.board_group_snapshot import build_board_group_snapshot
+from app.services.board_lifecycle import delete_board as delete_board_service
 from app.services.board_snapshot import build_board_snapshot
-from app.services.openclaw.gateway_resolver import gateway_client_config, require_gateway_for_board
-from app.services.openclaw.gateway_rpc import OpenClawGatewayError
-from app.services.openclaw.provisioning import OpenClawGatewayProvisioner
 from app.services.organizations import OrganizationContext, board_access_filter
 
 if TYPE_CHECKING:
@@ -168,18 +166,6 @@ async def _apply_board_update(
     return await crud.save(session, board)
 
 
-async def _board_gateway(
-    session: AsyncSession,
-    board: Board,
-) -> Gateway | None:
-    if not board.gateway_id:
-        return None
-    gateway = await require_gateway_for_board(session, board, require_workspace_root=True)
-    # Validate the connection config; the caller needs a configured gateway URL.
-    gateway_client_config(gateway)
-    return gateway
-
-
 @router.get("", response_model=DefaultLimitOffsetPage[BoardRead])
 async def list_boards(
     gateway_id: UUID | None = GATEWAY_ID_QUERY,
@@ -266,76 +252,4 @@ async def delete_board(
     board: Board = BOARD_USER_WRITE_DEP,
 ) -> OkResponse:
     """Delete a board and all dependent records."""
-    agents = await Agent.objects.filter_by(board_id=board.id).all(session)
-    task_ids = list(
-        await session.exec(select(Task.id).where(Task.board_id == board.id)),
-    )
-
-    config = await _board_gateway(session, board)
-    if config:
-        try:
-            for agent in agents:
-                await OpenClawGatewayProvisioner().delete_agent_lifecycle(
-                    agent=agent,
-                    gateway=config,
-                )
-        except OpenClawGatewayError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Gateway cleanup failed: {exc}",
-            ) from exc
-
-    if task_ids:
-        await crud.delete_where(
-            session,
-            ActivityEvent,
-            col(ActivityEvent.task_id).in_(task_ids),
-            commit=False,
-        )
-    await crud.delete_where(
-        session,
-        TaskDependency,
-        col(TaskDependency.board_id) == board.id,
-    )
-    await crud.delete_where(
-        session,
-        TaskFingerprint,
-        col(TaskFingerprint.board_id) == board.id,
-    )
-
-    # Approvals can reference tasks and agents, so delete before both.
-    await crud.delete_where(session, Approval, col(Approval.board_id) == board.id)
-
-    await crud.delete_where(session, BoardMemory, col(BoardMemory.board_id) == board.id)
-    await crud.delete_where(
-        session,
-        BoardOnboardingSession,
-        col(BoardOnboardingSession.board_id) == board.id,
-    )
-    await crud.delete_where(
-        session,
-        OrganizationBoardAccess,
-        col(OrganizationBoardAccess.board_id) == board.id,
-    )
-    await crud.delete_where(
-        session,
-        OrganizationInviteBoardAccess,
-        col(OrganizationInviteBoardAccess.board_id) == board.id,
-    )
-
-    # Tasks reference agents and have dependent records.
-    # delete tasks before agents.
-    await crud.delete_where(session, Task, col(Task.board_id) == board.id)
-
-    if agents:
-        agent_ids = [agent.id for agent in agents]
-        await crud.delete_where(
-            session,
-            ActivityEvent,
-            col(ActivityEvent.agent_id).in_(agent_ids),
-            commit=False,
-        )
-        await crud.delete_where(session, Agent, col(Agent.id).in_(agent_ids))
-    await session.delete(board)
-    await session.commit()
-    return OkResponse()
+    return await delete_board_service(session, board=board)
