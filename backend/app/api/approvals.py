@@ -20,12 +20,16 @@ from app.api.deps import (
     get_board_for_user_write,
     require_admin_or_agent,
 )
+from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.pagination import paginate
 from app.db.session import async_session_maker, get_session
+from app.models.agents import Agent
 from app.models.approvals import Approval
 from app.schemas.approvals import ApprovalCreate, ApprovalRead, ApprovalStatus, ApprovalUpdate
 from app.schemas.pagination import DefaultLimitOffsetPage
+from app.services.activity_log import record_activity
+from app.services.openclaw.gateway_dispatch import GatewayDispatchService
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -36,6 +40,7 @@ if TYPE_CHECKING:
     from app.models.boards import Board
 
 router = APIRouter(prefix="/boards/{board_id}/approvals", tags=["approvals"])
+logger = get_logger(__name__)
 
 TASK_ID_KEYS: tuple[str, ...] = ("task_id", "taskId", "taskID")
 STREAM_POLL_SECONDS = 2
@@ -88,6 +93,83 @@ def _serialize_approval(approval: Approval) -> dict[str, object]:
         approval,
         from_attributes=True,
     ).model_dump(mode="json")
+
+
+def _approval_resolution_message(
+    *,
+    board: Board,
+    approval: Approval,
+) -> str:
+    status_text = "approved" if approval.status == "approved" else "rejected"
+    lines = [
+        "APPROVAL RESOLVED",
+        f"Board: {board.name}",
+        f"Approval ID: {approval.id}",
+        f"Action: {approval.action_type}",
+        f"Decision: {status_text}",
+        f"Confidence: {approval.confidence}",
+    ]
+    if approval.task_id is not None:
+        lines.append(f"Task ID: {approval.task_id}")
+    lines.append("")
+    lines.append("Take action: continue execution using the final approval decision.")
+    return "\n".join(lines)
+
+
+async def _resolve_board_lead(
+    session: AsyncSession,
+    *,
+    board_id: UUID,
+) -> Agent | None:
+    return (
+        await Agent.objects.filter_by(board_id=board_id)
+        .filter(col(Agent.is_board_lead).is_(True))
+        .first(session)
+    )
+
+
+async def _notify_lead_on_approval_resolution(
+    *,
+    session: AsyncSession,
+    board: Board,
+    approval: Approval,
+) -> None:
+    if approval.status not in {"approved", "rejected"}:
+        return
+    lead = await _resolve_board_lead(session, board_id=board.id)
+    if lead is None or not lead.openclaw_session_id:
+        return
+
+    dispatch = GatewayDispatchService(session)
+    config = await dispatch.optional_gateway_config_for_board(board)
+    if config is None:
+        return
+
+    message = _approval_resolution_message(board=board, approval=approval)
+    error = await dispatch.try_send_agent_message(
+        session_key=lead.openclaw_session_id,
+        config=config,
+        agent_name=lead.name,
+        message=message,
+        deliver=False,
+    )
+    if error is None:
+        record_activity(
+            session,
+            event_type="approval.lead_notified",
+            message=f"Lead agent notified for {approval.status} approval {approval.id}.",
+            agent_id=lead.id,
+            task_id=approval.task_id,
+        )
+    else:
+        record_activity(
+            session,
+            event_type="approval.lead_notify_failed",
+            message=f"Lead notify failed for approval {approval.id}: {error}",
+            agent_id=lead.id,
+            task_id=approval.task_id,
+        )
+    await session.commit()
 
 
 async def _fetch_approval_events(
@@ -238,6 +320,7 @@ async def update_approval(
     if approval is None or approval.board_id != board.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     updates = payload.model_dump(exclude_unset=True)
+    prior_status = approval.status
     if "status" in updates:
         approval.status = updates["status"]
         if approval.status != "pending":
@@ -245,4 +328,18 @@ async def update_approval(
     session.add(approval)
     await session.commit()
     await session.refresh(approval)
+    if approval.status in {"approved", "rejected"} and approval.status != prior_status:
+        try:
+            await _notify_lead_on_approval_resolution(
+                session=session,
+                board=board,
+                approval=approval,
+            )
+        except Exception:
+            logger.exception(
+                "approval.lead_notify_unexpected board_id=%s approval_id=%s status=%s",
+                board.id,
+                approval.id,
+                approval.status,
+            )
     return approval
