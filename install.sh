@@ -424,22 +424,22 @@ ensure_nodejs() {
     node_version="$(node -v || true)"
     node_major="${node_version#v}"
     node_major="${node_major%%.*}"
-    if [[ "$node_major" =~ ^[0-9]+$ ]] && ((node_major >= 20)) && command_exists npm; then
+    if [[ "$node_major" =~ ^[0-9]+$ ]] && ((node_major >= 22)) && command_exists npm; then
       return
     fi
   fi
 
-  info "Node.js >= 20 is required for local deployment."
+  info "Node.js >= 22 is required for local deployment."
   if ! confirm "Install or upgrade Node.js now?" "y"; then
-    die "Cannot continue without Node.js >= 20."
+    die "Cannot continue without Node.js >= 22."
   fi
 
   if [[ "$PKG_MANAGER" != "apt" ]]; then
-    die "Node.js auto-install is currently implemented for apt-based distros only. Install Node.js >= 20 manually, then rerun installer. Suggested command: $(install_command_hint "$PKG_MANAGER" nodejs npm)"
+    die "Node.js auto-install is currently implemented for apt-based distros only. Install Node.js >= 22 manually, then rerun installer. Suggested command: $(install_command_hint "$PKG_MANAGER" nodejs npm)"
   fi
 
   install_packages ca-certificates curl gnupg
-  curl -fsSL https://deb.nodesource.com/setup_20.x | as_root bash -
+  curl -fsSL https://deb.nodesource.com/setup_22.x | as_root bash -
   install_packages nodejs
 
   if ! command_exists node || ! command_exists npm; then
@@ -449,8 +449,8 @@ ensure_nodejs() {
   node_version="$(node -v || true)"
   node_major="${node_version#v}"
   node_major="${node_major%%.*}"
-  if [[ ! "$node_major" =~ ^[0-9]+$ ]] || ((node_major < 20)); then
-    die "Detected Node.js $node_version. Node.js >= 20 is required."
+  if [[ ! "$node_major" =~ ^[0-9]+$ ]] || ((node_major < 22)); then
+    die "Detected Node.js $node_version. Node.js >= 22 is required."
   fi
 }
 
