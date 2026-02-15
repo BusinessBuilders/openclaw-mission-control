@@ -20,6 +20,7 @@ from app.schemas.gateway_api import (
     GatewaysStatusResponse,
 )
 from app.services.openclaw.db_service import OpenClawDBService
+from app.services.openclaw.gateway_compat import check_gateway_runtime_compatibility
 from app.services.openclaw.gateway_resolver import gateway_client_config, require_gateway_for_board
 from app.services.openclaw.gateway_rpc import GatewayConfig as GatewayClientConfig
 from app.services.openclaw.gateway_rpc import (
@@ -188,6 +189,20 @@ class GatewaySessionService(OpenClawDBService):
     ) -> GatewaysStatusResponse:
         board, config, main_session = await self.resolve_gateway(params, user=user)
         self._require_same_org(board, organization_id)
+        try:
+            compatibility = await check_gateway_runtime_compatibility(config)
+        except OpenClawGatewayError as exc:
+            return GatewaysStatusResponse(
+                connected=False,
+                gateway_url=config.url,
+                error=str(exc),
+            )
+        if not compatibility.compatible:
+            return GatewaysStatusResponse(
+                connected=False,
+                gateway_url=config.url,
+                error=compatibility.message,
+            )
         try:
             sessions = await openclaw_call("sessions.list", config=config)
             if isinstance(sessions, dict):

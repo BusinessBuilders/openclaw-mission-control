@@ -26,6 +26,7 @@ from app.services.openclaw.db_agent_state import (
     mint_agent_token,
 )
 from app.services.openclaw.db_service import OpenClawDBService
+from app.services.openclaw.gateway_compat import check_gateway_runtime_compatibility
 from app.services.openclaw.gateway_rpc import GatewayConfig as GatewayClientConfig
 from app.services.openclaw.gateway_rpc import OpenClawGatewayError, openclaw_call
 from app.services.openclaw.provisioning import OpenClawGatewayProvisioner
@@ -175,6 +176,22 @@ class GatewayAdminLifecycleService(OpenClawDBService):
                 return False
             return True
         return True
+
+    async def assert_gateway_runtime_compatible(self, *, url: str, token: str | None) -> None:
+        """Validate that a gateway runtime meets minimum supported version."""
+        config = GatewayClientConfig(url=url, token=token)
+        try:
+            result = await check_gateway_runtime_compatibility(config)
+        except OpenClawGatewayError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Gateway compatibility check failed: {exc}",
+            ) from exc
+        if not result.compatible:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=result.message or "Gateway runtime version is not supported.",
+            )
 
     async def provision_main_agent_record(
         self,

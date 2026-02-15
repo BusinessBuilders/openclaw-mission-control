@@ -94,6 +94,7 @@ async def create_gateway(
 ) -> Gateway:
     """Create a gateway and provision or refresh its main agent."""
     service = GatewayAdminLifecycleService(session)
+    await service.assert_gateway_runtime_compatible(url=payload.url, token=payload.token)
     data = payload.model_dump()
     gateway_id = uuid4()
     data["id"] = gateway_id
@@ -133,6 +134,12 @@ async def update_gateway(
         organization_id=ctx.organization.id,
     )
     updates = payload.model_dump(exclude_unset=True)
+    if "url" in updates or "token" in updates:
+        raw_next_url = updates.get("url", gateway.url)
+        next_url = raw_next_url.strip() if isinstance(raw_next_url, str) else ""
+        next_token = updates.get("token", gateway.token)
+        if next_url:
+            await service.assert_gateway_runtime_compatible(url=next_url, token=next_token)
     await crud.patch(session, gateway, updates)
     await service.ensure_main_agent(gateway, auth, action="update")
     return gateway
